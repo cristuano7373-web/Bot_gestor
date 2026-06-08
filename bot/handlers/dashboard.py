@@ -155,44 +155,85 @@ async def _render_group(context, gid: int):
     cfg = await settings.get_all(gid)
     premium = await subscriptions.is_premium(gid)
     title = await _group_title(gid)
-    plan = "💎 Premium activo" if premium else "🆓 Plan Gratis"
+    plan = "💎 Premium" if premium else "🆓 Gratis"
     sub = await subscriptions.get_subscription(gid)
-    extra = f" · {sub['days_left']} días" if (premium and sub and sub.get("days_left") is not None) else ""
+    extra = f" · {sub['days_left']}d" if (premium and sub and sub.get("days_left") is not None) else ""
+
+    # Resumen de qué está activo (estilo GroupHelp).
+    activos = [lbl for key, lbl in settings.TOGGLES.items() if int(cfg.get(key, 0) or 0)]
+    resumen = f"🟢 Activo: {len(activos)} funciones" if activos else "⚪ Nada activado aún"
 
     text = (
-        f"⚙️ *Configuración*\n"
-        f"📍 {title}\n"
-        f"{plan}{extra}\n"
+        f"⚙️ *Panel de configuración*\n"
+        f"📍 {title}  ·  {plan}{extra}\n"
         "═══════════════\n"
-        "Activa ✅ o desactiva ⬜ cada función.\n"
-        "Las 💎 necesitan Premium."
+        f"{resumen}\n\n"
+        "Elige una categoría para configurarla 👇"
     )
-
-    free = ["welcome_enabled", "goodbye_enabled", "antiflood_enabled",
-            "antilinks_enabled", "antibadwords_enabled"]
-    prem = ["captcha_enabled", "ai_moderation", "faq_enabled",
-            "levels_enabled", "nightmode_enabled", "fedban_enabled"]
-
-    def trow(key):
-        mark = "✅" if int(cfg.get(key, 0) or 0) else "⬜"
-        return [InlineKeyboardButton(f"{mark} {settings.TOGGLES[key]}",
-                                     callback_data=f"dash:tg:{gid}:{key}")]
-
-    rows = [[InlineKeyboardButton("──  GRATIS  ──", callback_data="dash:nop")]]
-    rows += [trow(k) for k in free]
-    rows.append([InlineKeyboardButton("──  💎 PREMIUM  ──", callback_data="dash:nop")])
-    rows += [trow(k) for k in prem]
-    rows.append([
-        InlineKeyboardButton("✍️ Bienvenida", callback_data=f"dash:set:{gid}:welcome"),
-        InlineKeyboardButton("📜 Reglas", callback_data=f"dash:set:{gid}:rules"),
-    ])
-    rows.append([
-        InlineKeyboardButton("⚠️ Avisos", callback_data=f"dash:warn:{gid}"),
-        InlineKeyboardButton("🌙 Modo noche", callback_data=f"dash:night:{gid}"),
-    ])
-    rows.append([InlineKeyboardButton("💎 Premium", callback_data=f"dash:prem:{gid}")])
-    rows.append([InlineKeyboardButton("🔄 Actualizar", callback_data=f"dash:cfg:{gid}")])
+    rows = [
+        [InlineKeyboardButton("👋 Bienvenida y reglas", callback_data=f"dash:cat:{gid}:welcome")],
+        [InlineKeyboardButton("🛡️ Moderación y filtros", callback_data=f"dash:cat:{gid}:mod")],
+        [InlineKeyboardButton("⚠️ Advertencias", callback_data=f"dash:warn:{gid}")],
+        [InlineKeyboardButton("🌙 Modo noche", callback_data=f"dash:night:{gid}")],
+        [InlineKeyboardButton("🧠 IA, CAPTCHA y FAQ 💎", callback_data=f"dash:cat:{gid}:ai")],
+        [InlineKeyboardButton("🎖️ Niveles y lista negra 💎", callback_data=f"dash:cat:{gid}:plus")],
+        [InlineKeyboardButton("💎 Premium", callback_data=f"dash:prem:{gid}")],
+    ]
     return text, InlineKeyboardMarkup(rows)
+
+
+# Categorías: título, interruptores y acciones (botones que abren un flujo).
+CATS = {
+    "welcome": {
+        "title": "👋 *Bienvenida y reglas*",
+        "desc": "Saluda a los nuevos y muestra las normas.",
+        "toggles": ["welcome_enabled", "goodbye_enabled"],
+        "actions": [("✍️ Editar bienvenida", "set:welcome"),
+                    ("📜 Editar reglas", "set:rules")],
+    },
+    "mod": {
+        "title": "🛡️ *Moderación y filtros*",
+        "desc": "Frena flood, enlaces y palabras prohibidas (los admins quedan exentos).",
+        "toggles": ["antiflood_enabled", "antilinks_enabled", "antibadwords_enabled"],
+        "actions": [],
+    },
+    "ai": {
+        "title": "🧠 *IA, CAPTCHA y FAQ* 💎",
+        "desc": "Verificación anti-bots, moderación con IA y auto-respuestas.",
+        "toggles": ["captcha_enabled", "ai_moderation", "faq_enabled"],
+        "actions": [],
+    },
+    "plus": {
+        "title": "🎖️ *Niveles y lista negra* 💎",
+        "desc": "Premia a los activos con niveles y banea globalmente a problemáticos.",
+        "toggles": ["levels_enabled", "fedban_enabled"],
+        "actions": [],
+    },
+}
+
+
+async def _render_cat(query, context, gid: int, catkey: str):
+    cat = CATS.get(catkey)
+    if not cat:
+        text, kb = await _render_group(context, gid)
+        await _edit(query, text, kb)
+        return
+    cfg = await settings.get_all(gid)
+    premium = await subscriptions.is_premium(gid)
+
+    lines = [cat["title"], "═══════════════", f"_{cat['desc']}_", ""]
+    if any(k in settings.PREMIUM_KEYS for k in cat["toggles"]) and not premium:
+        lines.append("💎 _Estas funciones necesitan Premium._\n")
+
+    rows = []
+    for key in cat["toggles"]:
+        mark = "✅" if int(cfg.get(key, 0) or 0) else "⬜"
+        rows.append([InlineKeyboardButton(f"{mark} {settings.TOGGLES[key]}",
+                                          callback_data=f"dash:tg:{gid}:{key}:{catkey}")])
+    for label, act in cat["actions"]:
+        rows.append([InlineKeyboardButton(label, callback_data=f"dash:{act}:{gid}")])
+    rows.append([InlineKeyboardButton("‹ Atrás", callback_data=f"dash:cfg:{gid}")])
+    await _edit(query, "\n".join(lines), InlineKeyboardMarkup(rows))
 
 
 # --------------------------------------------------------------------------- #
@@ -253,16 +294,27 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text, kb = await _render_group(context, gid)
         await _edit(query, text, kb)
 
+    elif action == "cat":
+        await query.answer()
+        await _render_cat(query, context, gid, parts[3])
+
     elif action == "tg":
         key = parts[3]
+        catkey = parts[4] if len(parts) > 4 else None
         if key in settings.PREMIUM_KEYS and not await subscriptions.is_premium(gid):
             await query.answer("💎 Función Premium. Actívala en la sección Premium.",
                                show_alert=True)
             return
         await settings.toggle(gid, key)
         await query.answer("Actualizado ✅")
-        text, kb = await _render_group(context, gid)
-        await _edit(query, text, kb)
+        # Volver a dibujar la vista de donde vino el interruptor.
+        if catkey == "night":
+            await _render_night(query, context, gid)
+        elif catkey in CATS:
+            await _render_cat(query, context, gid, catkey)
+        else:
+            text, kb = await _render_group(context, gid)
+            await _edit(query, text, kb)
 
     elif action == "set":
         field = parts[3]
@@ -385,7 +437,7 @@ async def _render_night(query, context, gid: int):
         text += "\n💎 _Necesita Premium para activarse._"
     toggle_label = ("🌙 Desactivar modo noche" if enabled else "🌙 Activar modo noche")
     rows = [
-        [InlineKeyboardButton(toggle_label, callback_data=f"dash:tg:{gid}:nightmode_enabled")],
+        [InlineKeyboardButton(toggle_label, callback_data=f"dash:tg:{gid}:nightmode_enabled:night")],
         [
             InlineKeyboardButton(f"🕒 Cierre: {start_h:02d}:00", callback_data=f"dash:nh:{gid}:start"),
             InlineKeyboardButton(f"🕖 Apertura: {end_h:02d}:00", callback_data=f"dash:nh:{gid}:end"),
