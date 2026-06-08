@@ -20,7 +20,11 @@ from moderation.nightmode import is_night
 
 log = logging.getLogger("bot_gestor")
 
-_CLOSED = ChatPermissions(can_send_messages=False)
+_CLOSED = ChatPermissions(
+    can_send_messages=False, can_send_audios=False, can_send_documents=False,
+    can_send_photos=False, can_send_videos=False, can_send_video_notes=False,
+    can_send_voice_notes=False, can_send_polls=False, can_send_other_messages=False,
+    can_add_web_page_previews=False)
 _OPEN = ChatPermissions(
     can_send_messages=True, can_send_audios=True, can_send_documents=True,
     can_send_photos=True, can_send_videos=True, can_send_other_messages=True,
@@ -234,19 +238,38 @@ async def nightmode_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
         if state.get(gid) == night:
             continue
         start_h, end_h = int(cfg["nightmode_start"]), int(cfg["nightmode_end"])
+        # Aplicar el cierre/apertura. Si falla por permisos, avisar a los admins.
         try:
             await context.bot.set_chat_permissions(gid, _CLOSED if night else _OPEN)
-            if night:
-                msg = (f"🌙 *Modo noche activado*\n"
-                       f"De las *{start_h:02d}:00* a las *{end_h:02d}:00* no se "
-                       f"podrán enviar mensajes.\n¡Feliz noche a todos! 😴💤")
-            else:
-                msg = ("☀️ *¡Buenos días!*\n"
-                       "El grupo está abierto otra vez. ¡Ya pueden escribir! 💬")
+        except Exception as e:  # noqa: BLE001
+            errored = context.application.bot_data.setdefault("night_perm_error", set())
+            if gid not in errored:
+                errored.add(gid)
+                try:
+                    await context.bot.send_message(
+                        gid,
+                        "⚠️ *Modo noche:* no pude cerrar el grupo.\n"
+                        "Necesito ser *administrador* con el permiso de "
+                        "*\"Añadir nuevos administradores\"* o, al menos, "
+                        "*restringir/silenciar usuarios* y *cambiar info del grupo*.",
+                        parse_mode=ParseMode.MARKDOWN)
+                except Exception:  # noqa: BLE001
+                    pass
+            continue
+        # Éxito: limpiar marca de error y anunciar.
+        context.application.bot_data.get("night_perm_error", set()).discard(gid)
+        if night:
+            msg = (f"🌙 *Modo noche activado*\n"
+                   f"De las *{start_h:02d}:00* a las *{end_h:02d}:00* solo los "
+                   f"administradores pueden enviar mensajes.\n¡Feliz noche a todos! 😴💤")
+        else:
+            msg = ("☀️ *¡Buenos días!*\n"
+                   "El grupo está abierto otra vez. ¡Ya pueden escribir! 💬")
+        try:
             await context.bot.send_message(gid, msg, parse_mode=ParseMode.MARKDOWN)
-            state[gid] = night
         except Exception:  # noqa: BLE001
             pass
+        state[gid] = night
 
 
 # ===================== Federación (lista negra global) =====================
