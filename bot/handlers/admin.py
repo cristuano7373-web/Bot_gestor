@@ -18,13 +18,29 @@ from services.entities import audit
 @admin_only
 async def cmd_adminpanel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
-        "🛠️ *Panel de administrador*\n"
-        "━━━━━━━━━━━━━━━\n"
-        "🎟️ /createlicense <cantidad> <días> — generar licencias\n"
+        "👑 *PANEL DEL DUEÑO*\n"
+        "═══════════════\n\n"
+        "🎟️ *Licencias (claves)*\n"
+        "`/createlicense <cant> <días>` — generar claves\n"
         "   _ej:_ `/createlicense 5 30`\n"
-        "🚫 /revokelicense <código> — revocar una licencia\n"
-        "📜 /premiumusers — licencias recientes\n"
-        "📊 /statsglobal — métricas globales del bot\n",
+        "`/revokelicense <código>` — anular una clave sin canjear\n"
+        "`/premiumusers` — ver claves recientes y su estado\n\n"
+        "💎 *Premium de grupos*\n"
+        "`/premiumgroups` — listar grupos Premium (con su ID)\n"
+        "`/delpremium <group_id>` — quitar Premium a un grupo\n\n"
+        "⭐ *Pagos (Stars)*\n"
+        "`/payments` — ver pagos recibidos (con su charge_id)\n"
+        "`/refund <charge_id>` — reembolsar un pago concreto\n"
+        "`/refundlast` — reembolsar el último pago\n"
+        "`/balance` — saldo de Stars del bot\n\n"
+        "📊 *Métricas*\n"
+        "`/statsglobal` — grupos, Premium e ingresos totales\n\n"
+        "═══════════════\n"
+        "💡 *Flujo típico para vender:*\n"
+        "1) `/createlicense 1 30` → copias la clave\n"
+        "2) Se la das al cliente que te pagó\n"
+        "3) Él la canjea con `/redeem CLAVE` en su grupo\n"
+        "4) Si hace falta: `/premiumgroups` y `/delpremium <id>`",
         parse_mode=ParseMode.MARKDOWN)
 
 
