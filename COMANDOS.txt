@@ -1,0 +1,104 @@
+============================================================
+            BOT_GESTOR - LISTA DE COMANDOS
+============================================================
+
+LEYENDA:
+  [U]  Cualquier usuario
+  [A]  Admin del grupo
+  [B]  Admin del bot (tu ID en ADMIN_IDS)
+  (P)  Requiere Premium activo en el grupo
+
+------------------------------------------------------------
+ GENERAL
+------------------------------------------------------------
+  /start              [U]  Inicia el bot. En privado muestra el menu;
+                           en grupo confirma que esta activo.
+  /help  /ayuda       [U]  Muestra la guia de comandos.
+  /panel              [A]  Configuracion con botones: activa o
+                           desactiva cada funcion.
+
+------------------------------------------------------------
+ MODERACION
+------------------------------------------------------------
+  /ban                [A]  Banea a un usuario (responde o /ban ID).
+  /unban              [A]  Quita el baneo a un usuario.
+  /kick  /expulsar    [A]  Expulsa al usuario (puede volver).
+  /mute [min]         [A]  Silencia al usuario. Opcional: minutos.
+  /unmute /reactivar  [A]  Devuelve la voz a un usuario silenciado.
+  /warn [motivo]      [A]  Advierte. Al llegar al limite aplica la
+                           accion configurada (mute/kick/ban).
+
+  Filtros automaticos (se activan en /panel): antiflood,
+  anti-enlaces, anti-palabras y antispam. Los admins quedan exentos.
+
+------------------------------------------------------------
+ CONFIGURACION DEL GRUPO
+------------------------------------------------------------
+  /reglas  /rules     [U]  Muestra las reglas del grupo.
+  /setreglas <texto>  [A]  Define las reglas del grupo.
+  /setbienvenida <t>  [A]  Define la bienvenida. Variables:
+                           {nombre}, {grupo}.
+
+------------------------------------------------------------
+ ESTADISTICAS
+------------------------------------------------------------
+  /stats              [U]  Resumen de 7 dias: mensajes, usuarios
+                           activos, nuevos, ranking y grafico.
+
+------------------------------------------------------------
+ FUNCIONES PREMIUM
+------------------------------------------------------------
+  /premium            [U]  Muestra el plan Premium y como activarlo.
+  /premium_info       [U]  Detalle de lo que incluye Premium.
+  /premium_status         [U]  Estado de la suscripcion del grupo.
+  /subscription       [U]  Igual que premium_status.
+  /redeem <codigo>    [U]  Canjea una licencia para activar Premium.
+  /reporte [s|m]   (P)[A]  Reporte de actividad + export CSV.
+  /nivel  /level   (P)[U]  Muestra tu nivel y XP en el grupo.
+  /faq palabra | resp (P)[A]  Crea una auto-respuesta por palabra.
+  /faqs  /faqlist     [U]  Lista las auto-respuestas.
+  /faqdel <palabra>   [A]  Elimina una auto-respuesta.
+  /programar C | T (P)[A]  Mensaje programado. Ej: 18:30 (una vez)
+                           o 6h / 1d (recurrente).
+  /programados        [A]  Lista los mensajes programados.
+  /cancelprog <id>    [A]  Cancela un mensaje programado.
+  /nochehoras <i> <f> (P)[A]  Modo nocturno. Ej: /nochehoras 23 7.
+  /fban [motivo]   (P)[A]  Lista negra global: banea en todos tus grupos.
+  /unfban             [A]  Quita a un usuario de la lista negra global.
+  /fbanlist  /fbans   [A]  Muestra tu lista negra global.
+
+  Funciones automaticas Premium (se activan en /panel):
+   - CAPTCHA anti-bots: el nuevo miembro se verifica o es expulsado.
+   - Moderacion IA: detecta spam, insultos y estafas.
+   - Auto-respuestas: responde a las palabras clave del FAQ.
+   - Niveles: gana XP por participar y sube de nivel.
+   - Modo nocturno: cierra el grupo en el horario configurado.
+   - Lista negra global: aplica los baneos al entrar.
+
+------------------------------------------------------------
+ ADMINISTRACION DEL BOT (solo tu)
+------------------------------------------------------------
+  /adminpanel                  [B]  Panel de comandos de admin.
+  /createlicense <cant> <dias> [B]  Genera licencias. Ej: 5 30.
+  /revokelicense <codigo>      [B]  Revoca una licencia no canjeada.
+  /premiumusers                [B]  Lista las licencias y su estado.
+  /statsglobal                 [B]  Metricas globales: grupos,
+                                    Premium e ingresos en Stars.
+  /payments                    [B]  Lista los pagos (con charge_id).
+  /refund <charge_id>          [B]  Reembolsa un pago en Stars.
+  /refundlast                  [B]  Reembolsa el ultimo pago.
+  /balance                     [B]  Saldo de Stars del bot.
+
+------------------------------------------------------------
+ COMO SE ACTIVA EL PREMIUM
+------------------------------------------------------------
+  1) Con licencia: generas un codigo con /createlicense y el
+     usuario lo canjea con /redeem CODIGO dentro de su grupo.
+  2) Con Telegram Stars: en el grupo, /premium -> boton estrella
+     -> pago dentro de Telegram -> se activa solo.
+
+  NOTA: El Premium se activa por GRUPO, no por cuenta.
+  El bot debe ser ADMINISTRADOR del grupo para moderar,
+  banear y cerrar (modo nocturno).
+
+============================================================

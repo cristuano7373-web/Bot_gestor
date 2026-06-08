@@ -1,0 +1,429 @@
+"""Panel de configuración en PRIVADO, todo por botones.
+
+Idea: la configuración no se hace en el grupo (donde se pierde entre mensajes),
+sino en el chat privado con el bot. Desde el grupo, un único botón abre el panel
+en privado mediante un deep link. Toda la navegación edita el MISMO mensaje y los
+ajustes de texto (bienvenida, reglas) se piden con flujos guiados.
+
+callback_data: "dash:<accion>:<...>".
+"""
+from __future__ import annotations
+
+from telegram import (
+    InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo,
+)
+from telegram.constants import ChatMemberStatus, ChatType, ParseMode
+from telegram.error import BadRequest
+from telegram.ext import ContextTypes
+
+import config
+from bot.common import is_group
+from services import settings, subscriptions, licenses
+from services.entities import ensure_group, ensure_user, audit
+from db.base import get_sessionmaker
+from db.models import Group
+
+
+# --------------------------------------------------------------------------- #
+# Textos de onboarding (qué es el bot)
+# --------------------------------------------------------------------------- #
+INTRO = (
+    "🤖 *Bot_Gestor*\n"
+    "_El asistente que administra tu grupo por ti._\n"
+    "═══════════════\n\n"
+    "Yo me encargo de:\n"
+    "🛡️ Frenar spam, flood, enlaces y bots\n"
+    "👋 Dar la bienvenida a los nuevos\n"
+    "📊 Mostrarte estadísticas del grupo\n"
+    "🎖️ Premiar a los más activos con niveles\n"
+    "⏰ Enviar mensajes programados\n"
+    "💎 Y mucho más con Premium\n\n"
+    "👇 Empieza configurando un grupo."
+)
+
+WHAT = (
+    "❓ *¿Qué es Bot_Gestor?*\n"
+    "═══════════════\n"
+    "Es un bot para *administrar grupos de Telegram* de forma automática y fácil.\n\n"
+    "*Cómo se usa en 3 pasos:*\n"
+    "1️⃣ Me añades a tu grupo y me haces *administrador*.\n"
+    "2️⃣ Escribes /config en el grupo y pulsas *Abrir panel*.\n"
+    "3️⃣ Aquí en privado, activas con botones lo que quieras.\n\n"
+    "Así configuras todo sin llenar el grupo de mensajes. 😎"
+)
+
+
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
+async def _is_group_admin(context, group_id: int, user_id: int) -> bool:
+    if config.is_admin(user_id):
+        return True
+    try:
+        m = await context.bot.get_chat_member(group_id, user_id)
+        return m.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _group_title(group_id: int) -> str:
+    sm = get_sessionmaker()
+    async with sm() as s:
+        g = await s.get(Group, group_id)
+        return (g.title if g and g.title else None) or "tu grupo"
+
+
+async def _user_groups(user_id: int) -> list[dict]:
+    """Grupos que el usuario añadió (acceso rápido desde el panel)."""
+    from sqlalchemy import select
+    sm = get_sessionmaker()
+    async with sm() as s:
+        res = await s.execute(
+            select(Group).where(Group.added_by == user_id, Group.is_active == True))  # noqa: E712
+        return [{"id": g.id, "title": g.title or str(g.id)} for g in res.scalars()]
+
+
+# --------------------------------------------------------------------------- #
+# /start  (privado: onboarding + deep link; grupo: botón a privado)
+# --------------------------------------------------------------------------- #
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    await ensure_user(user.id, user.username, user.first_name)
+
+    if is_group(update.effective_chat):
+        await ensure_group(update.effective_chat.id, update.effective_chat.title, user.id)
+        await _post_open_panel(update, context)
+        return
+
+    # Deep link: /start cfg_<group_id>
+    args = context.args or []
+    if args and args[0].startswith("cfg_"):
+        try:
+            gid = int(args[0][4:])
+        except ValueError:
+            gid = None
+        if gid is not None:
+            if not await _is_group_admin(context, gid, user.id):
+                await update.effective_message.reply_text(
+                    "🔒 Solo los administradores de ese grupo pueden configurarlo.")
+                return
+            text, kb = await _render_group(context, gid)
+            await update.effective_message.reply_text(
+                text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+            return
+
+    await update.effective_message.reply_text(
+        INTRO, parse_mode=ParseMode.MARKDOWN, reply_markup=_home_kb())
+
+
+def _home_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚙️ Configurar un grupo", callback_data="dash:groups")],
+        [InlineKeyboardButton("💎 Premium", callback_data="dash:prem:0")],
+        [InlineKeyboardButton("❓ ¿Qué es esto?", callback_data="dash:what")],
+    ])
+
+
+async def _post_open_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """En el grupo: publica un único mensaje con el botón al panel privado."""
+    bot_username = context.bot.username
+    gid = update.effective_chat.id
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(
+        "⚙️ Abrir panel de configuración",
+        url=f"https://t.me/{bot_username}?start=cfg_{gid}")]])
+    await update.effective_message.reply_text(
+        "🤖 *Bot_Gestor* está aquí.\n"
+        "Para configurarme, pulsa el botón y te atiendo en privado "
+        "(así no llenamos el grupo de mensajes).",
+        parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+
+
+async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_group(update.effective_chat):
+        await update.effective_message.reply_text(
+            "Usa /config dentro del grupo que quieres configurar.")
+        return
+    await ensure_group(update.effective_chat.id, update.effective_chat.title,
+                       update.effective_user.id)
+    await _post_open_panel(update, context)
+
+
+# --------------------------------------------------------------------------- #
+# Render del panel de un grupo
+# --------------------------------------------------------------------------- #
+async def _render_group(context, gid: int):
+    cfg = await settings.get_all(gid)
+    premium = await subscriptions.is_premium(gid)
+    title = await _group_title(gid)
+    plan = "💎 Premium activo" if premium else "🆓 Plan Gratis"
+    sub = await subscriptions.get_subscription(gid)
+    extra = f" · {sub['days_left']} días" if (premium and sub and sub.get("days_left") is not None) else ""
+
+    text = (
+        f"⚙️ *Configuración*\n"
+        f"📍 {title}\n"
+        f"{plan}{extra}\n"
+        "═══════════════\n"
+        "Activa ✅ o desactiva ⬜ cada función.\n"
+        "Las 💎 necesitan Premium."
+    )
+
+    free = ["welcome_enabled", "goodbye_enabled", "antiflood_enabled",
+            "antilinks_enabled", "antibadwords_enabled"]
+    prem = ["captcha_enabled", "ai_moderation", "faq_enabled",
+            "levels_enabled", "nightmode_enabled", "fedban_enabled"]
+
+    def trow(key):
+        mark = "✅" if int(cfg.get(key, 0) or 0) else "⬜"
+        return [InlineKeyboardButton(f"{mark} {settings.TOGGLES[key]}",
+                                     callback_data=f"dash:tg:{gid}:{key}")]
+
+    rows = [[InlineKeyboardButton("──  GRATIS  ──", callback_data="dash:nop")]]
+    rows += [trow(k) for k in free]
+    rows.append([InlineKeyboardButton("──  💎 PREMIUM  ──", callback_data="dash:nop")])
+    rows += [trow(k) for k in prem]
+    rows.append([
+        InlineKeyboardButton("✍️ Bienvenida", callback_data=f"dash:set:{gid}:welcome"),
+        InlineKeyboardButton("📜 Reglas", callback_data=f"dash:set:{gid}:rules"),
+    ])
+    rows.append([
+        InlineKeyboardButton("⚠️ Avisos", callback_data=f"dash:warn:{gid}"),
+        InlineKeyboardButton("💎 Premium", callback_data=f"dash:prem:{gid}"),
+    ])
+    rows.append([InlineKeyboardButton("🔄 Actualizar", callback_data=f"dash:cfg:{gid}")])
+    return text, InlineKeyboardMarkup(rows)
+
+
+# --------------------------------------------------------------------------- #
+# Router de callbacks del panel
+# --------------------------------------------------------------------------- #
+async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    parts = query.data.split(":")
+    action = parts[1]
+    user = query.from_user
+
+    if action == "nop":
+        await query.answer()
+        return
+
+    if action == "home":
+        await query.answer()
+        await _edit(query, INTRO, _home_kb())
+        return
+
+    if action == "what":
+        await query.answer()
+        await _edit(query, WHAT, _back_home_kb())
+        return
+
+    if action == "groups":
+        await query.answer()
+        groups = await _user_groups(user.id)
+        if not groups:
+            await _edit(query,
+                        "📭 *No veo grupos tuyos todavía.*\n\n"
+                        "Añádeme a tu grupo, hazme *administrador* y escribe "
+                        "/config ahí para abrir su panel.",
+                        _back_home_kb())
+            return
+        rows = [[InlineKeyboardButton(f"📍 {g['title'][:30]}",
+                                      callback_data=f"dash:cfg:{g['id']}")]
+                for g in groups]
+        rows.append([InlineKeyboardButton("‹ Volver", callback_data="dash:home")])
+        await _edit(query, "⚙️ *Elige el grupo a configurar:*",
+                    InlineKeyboardMarkup(rows))
+        return
+
+    if action == "prem":
+        gid = int(parts[2])
+        await query.answer()
+        await _render_premium(query, context, gid)
+        return
+
+    # A partir de aquí todo requiere group_id y ser admin del grupo.
+    gid = int(parts[2])
+    if not await _is_group_admin(context, gid, user.id):
+        await query.answer("Solo administradores del grupo.", show_alert=True)
+        return
+
+    if action == "cfg":
+        await query.answer()
+        text, kb = await _render_group(context, gid)
+        await _edit(query, text, kb)
+
+    elif action == "tg":
+        key = parts[3]
+        if key in settings.PREMIUM_KEYS and not await subscriptions.is_premium(gid):
+            await query.answer("💎 Función Premium. Actívala en la sección Premium.",
+                               show_alert=True)
+            return
+        await settings.toggle(gid, key)
+        await query.answer("Actualizado ✅")
+        text, kb = await _render_group(context, gid)
+        await _edit(query, text, kb)
+
+    elif action == "set":
+        field = parts[3]
+        context.user_data["dash_flow"] = {
+            "field": field, "gid": gid,
+            "msg_id": query.message.message_id, "chat_id": query.message.chat_id}
+        await query.answer()
+        if field == "welcome":
+            prompt = ("✍️ *Escríbeme el mensaje de bienvenida.*\n\n"
+                      "Puedes usar:\n`{nombre}` → nombre del nuevo miembro\n"
+                      "`{grupo}` → nombre del grupo\n\n"
+                      "_Ejemplo:_ ¡Hola {nombre}, bienvenido a {grupo}! 🎉")
+        else:
+            prompt = "📜 *Escríbeme las reglas del grupo.*\nEscríbelas tal cual quieres que se muestren."
+        await _edit(query, prompt, _cancel_kb(gid))
+
+    elif action == "warn":
+        await query.answer()
+        await _render_warn(query, context, gid)
+
+    elif action == "num":
+        key, val = parts[3], int(parts[4])
+        await settings.set(gid, key, val)
+        await query.answer("Guardado ✅")
+        await _render_warn(query, context, gid)
+
+    elif action == "wa":
+        await settings.set(gid, "warn_action", parts[3])
+        await query.answer("Guardado ✅")
+        await _render_warn(query, context, gid)
+
+    elif action == "redeem":
+        context.user_data["dash_flow"] = {
+            "field": "redeem", "gid": gid,
+            "msg_id": query.message.message_id, "chat_id": query.message.chat_id}
+        await query.answer()
+        await _edit(query,
+                    "🎟️ *Escríbeme el código de tu licencia.*\n"
+                    "_Formato:_ `GEST-XXXX-XXXX-XXXX`",
+                    _cancel_kb(gid))
+
+    elif action == "buy":
+        await query.answer()
+        from bot.handlers.payments import send_invoice_for
+        try:
+            await send_invoice_for(context, query.message.chat_id, gid, user.id)
+        except Exception as e:  # noqa: BLE001
+            await query.message.reply_text(
+                f"No pude generar el pago con Stars: {e}\n"
+                "Puedes activar Premium con un código (botón 🎟️).")
+
+    elif action == "cancel":
+        context.user_data.pop("dash_flow", None)
+        await query.answer("Cancelado")
+        text, kb = await _render_group(context, gid)
+        await _edit(query, text, kb)
+
+
+# --------------------------------------------------------------------------- #
+# Sub-paneles
+# --------------------------------------------------------------------------- #
+async def _render_warn(query, context, gid: int):
+    cfg = await settings.get_all(gid)
+    limit = int(cfg["warn_limit"])
+    action = cfg["warn_action"]
+    text = (f"⚠️ *Sistema de avisos*\n"
+            f"═══════════════\n"
+            f"Avisos antes de actuar: *{limit}*\n"
+            f"Acción al llegar al límite: *{action}*\n\n"
+            "Elige cuántos avisos y qué pasa al alcanzarlos:")
+    num_row = [InlineKeyboardButton(("•" if n == limit else "") + str(n),
+                                    callback_data=f"dash:num:{gid}:warn_limit:{n}")
+               for n in (1, 2, 3, 4, 5)]
+    act_row = [InlineKeyboardButton(("✅ " if a == action else "") + a,
+                                    callback_data=f"dash:wa:{gid}:{a}")
+               for a in ("mute", "kick", "ban")]
+    kb = InlineKeyboardMarkup([
+        num_row, act_row,
+        [InlineKeyboardButton("‹ Volver", callback_data=f"dash:cfg:{gid}")],
+    ])
+    await _edit(query, text, kb)
+
+
+async def _render_premium(query, context, gid: int):
+    from bot.handlers.premium import PREMIUM_INFO
+    rows = []
+    if gid:
+        premium = await subscriptions.is_premium(gid)
+        if premium:
+            sub = await subscriptions.get_subscription(gid)
+            text = (f"💎 *Premium activo*\n═══════════════\n"
+                    f"Días restantes: *{sub['days_left']}*\n"
+                    f"Disfruta todas las funciones. 🎉")
+            rows.append([InlineKeyboardButton("‹ Volver", callback_data=f"dash:cfg:{gid}")])
+        else:
+            text = PREMIUM_INFO
+            rows.append([InlineKeyboardButton("⭐ Pagar con Telegram Stars",
+                                              callback_data=f"dash:buy:{gid}")])
+            rows.append([InlineKeyboardButton("🎟️ Tengo un código",
+                                              callback_data=f"dash:redeem:{gid}")])
+            rows.append([InlineKeyboardButton("‹ Volver", callback_data=f"dash:cfg:{gid}")])
+    else:
+        text = PREMIUM_INFO
+        rows.append([InlineKeyboardButton("‹ Volver", callback_data="dash:home")])
+    await _edit(query, text, InlineKeyboardMarkup(rows))
+
+
+# --------------------------------------------------------------------------- #
+# Captura de texto de los flujos (bienvenida, reglas, código)
+# --------------------------------------------------------------------------- #
+async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    flow = context.user_data.get("dash_flow")
+    if not flow:
+        return
+    text = (update.effective_message.text or "").strip()
+    gid = flow["gid"]
+    field = flow["field"]
+    context.user_data.pop("dash_flow", None)
+
+    note = ""
+    if field == "welcome":
+        await settings.set(gid, "welcome_text", text)
+        await settings.set(gid, "welcome_enabled", 1)
+        note = "✅ Bienvenida actualizada y activada."
+    elif field == "rules":
+        await settings.set(gid, "rules_text", text)
+        note = "✅ Reglas guardadas."
+    elif field == "redeem":
+        try:
+            result = await licenses.redeem(text, update.effective_user.id, gid)
+            await audit(update.effective_user.id, "redeem", f"group={gid}")
+            note = f"✅ ¡Premium activado por {result['days']} días! 💎"
+        except licenses.RedeemError as e:
+            note = str(e)
+
+    # Volver a mostrar el panel del grupo, editando el mensaje original.
+    text_cfg, kb = await _render_group(context, gid)
+    try:
+        await context.bot.edit_message_text(
+            f"{note}\n\n{text_cfg}", chat_id=flow["chat_id"], message_id=flow["msg_id"],
+            parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+    except BadRequest:
+        await update.effective_message.reply_text(
+            f"{note}\n\n{text_cfg}", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+
+
+# --------------------------------------------------------------------------- #
+# Teclados utilitarios
+# --------------------------------------------------------------------------- #
+def _back_home_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("‹ Volver", callback_data="dash:home")]])
+
+
+def _cancel_kb(gid: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("✖️ Cancelar",
+                                                       callback_data=f"dash:cancel:{gid}")]])
+
+
+async def _edit(query, text: str, kb) -> None:
+    try:
+        await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb,
+                                      disable_web_page_preview=True)
+    except BadRequest as e:
+        if "not modified" not in str(e).lower():
+            pass
