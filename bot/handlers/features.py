@@ -233,12 +233,17 @@ async def nightmode_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
         night = is_night(hour, int(cfg["nightmode_start"]), int(cfg["nightmode_end"]))
         if state.get(gid) == night:
             continue
+        start_h, end_h = int(cfg["nightmode_start"]), int(cfg["nightmode_end"])
         try:
             await context.bot.set_chat_permissions(gid, _CLOSED if night else _OPEN)
-            await context.bot.send_message(
-                gid, "🌙 *Grupo cerrado por la noche.* Volvemos a la mañana."
-                if night else "☀️ *¡Buenos días! Grupo abierto de nuevo.*",
-                parse_mode=ParseMode.MARKDOWN)
+            if night:
+                msg = (f"🌙 *Modo noche activado*\n"
+                       f"De las *{start_h:02d}:00* a las *{end_h:02d}:00* no se "
+                       f"podrán enviar mensajes.\n¡Feliz noche a todos! 😴💤")
+            else:
+                msg = ("☀️ *¡Buenos días!*\n"
+                       "El grupo está abierto otra vez. ¡Ya pueden escribir! 💬")
+            await context.bot.send_message(gid, msg, parse_mode=ParseMode.MARKDOWN)
             state[gid] = night
         except Exception:  # noqa: BLE001
             pass

@@ -188,8 +188,9 @@ async def _render_group(context, gid: int):
     ])
     rows.append([
         InlineKeyboardButton("⚠️ Avisos", callback_data=f"dash:warn:{gid}"),
-        InlineKeyboardButton("💎 Premium", callback_data=f"dash:prem:{gid}"),
+        InlineKeyboardButton("🌙 Modo noche", callback_data=f"dash:night:{gid}"),
     ])
+    rows.append([InlineKeyboardButton("💎 Premium", callback_data=f"dash:prem:{gid}")])
     rows.append([InlineKeyboardButton("🔄 Actualizar", callback_data=f"dash:cfg:{gid}")])
     return text, InlineKeyboardMarkup(rows)
 
@@ -293,6 +294,26 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await query.answer("Guardado ✅")
         await _render_warn(query, context, gid)
 
+    elif action == "night":
+        await query.answer()
+        await _render_night(query, context, gid)
+
+    elif action == "nh":
+        # Mostrar la rejilla de horas para 'start' o 'end'.
+        which = parts[3]
+        await query.answer()
+        await _render_hours(query, gid, which)
+
+    elif action == "nset":
+        which, hour = parts[3], int(parts[4])
+        key = "nightmode_start" if which == "start" else "nightmode_end"
+        await settings.set(gid, key, hour)
+        # Si configuran horas, activamos el modo noche automáticamente.
+        if await subscriptions.is_premium(gid):
+            await settings.set(gid, "nightmode_enabled", 1)
+        await query.answer("Hora guardada ✅")
+        await _render_night(query, context, gid)
+
     elif action == "redeem":
         context.user_data["dash_flow"] = {
             "field": "redeem", "gid": gid,
@@ -343,6 +364,50 @@ async def _render_warn(query, context, gid: int):
         [InlineKeyboardButton("‹ Volver", callback_data=f"dash:cfg:{gid}")],
     ])
     await _edit(query, text, kb)
+
+
+async def _render_night(query, context, gid: int):
+    cfg = await settings.get_all(gid)
+    premium = await subscriptions.is_premium(gid)
+    enabled = int(cfg.get("nightmode_enabled", 0) or 0)
+    start_h, end_h = int(cfg["nightmode_start"]), int(cfg["nightmode_end"])
+    estado = "✅ Activado" if enabled else "⬜ Desactivado"
+    text = (
+        "🌙 *Modo noche*\n"
+        "═══════════════\n"
+        f"Estado: *{estado}*\n"
+        f"🌙 Cierra a las *{start_h:02d}:00*\n"
+        f"☀️ Abre a las *{end_h:02d}:00*\n\n"
+        "El grupo se cierra solo en ese horario y se reabre por la mañana, "
+        "avisando a todos.\n"
+    )
+    if not premium:
+        text += "\n💎 _Necesita Premium para activarse._"
+    toggle_label = ("🌙 Desactivar modo noche" if enabled else "🌙 Activar modo noche")
+    rows = [
+        [InlineKeyboardButton(toggle_label, callback_data=f"dash:tg:{gid}:nightmode_enabled")],
+        [
+            InlineKeyboardButton(f"🕒 Cierre: {start_h:02d}:00", callback_data=f"dash:nh:{gid}:start"),
+            InlineKeyboardButton(f"🕖 Apertura: {end_h:02d}:00", callback_data=f"dash:nh:{gid}:end"),
+        ],
+        [InlineKeyboardButton("‹ Volver", callback_data=f"dash:cfg:{gid}")],
+    ]
+    await _edit(query, text, InlineKeyboardMarkup(rows))
+
+
+async def _render_hours(query, gid: int, which: str):
+    titulo = "cierre 🌙" if which == "start" else "apertura ☀️"
+    text = f"Elige la *hora de {titulo}* (formato 24h):"
+    rows, row = [], []
+    for h in range(24):
+        row.append(InlineKeyboardButton(f"{h:02d}", callback_data=f"dash:nset:{gid}:{which}:{h}"))
+        if len(row) == 6:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton("‹ Volver", callback_data=f"dash:night:{gid}")])
+    await _edit(query, text, InlineKeyboardMarkup(rows))
 
 
 async def _render_premium(query, context, gid: int):
@@ -397,15 +462,18 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except licenses.RedeemError as e:
             note = str(e)
 
-    # Volver a mostrar el panel del grupo, editando el mensaje original.
-    text_cfg, kb = await _render_group(context, gid)
+    # Quitar los botones del mensaje de "escríbeme..." para que no queden sueltos arriba.
     try:
-        await context.bot.edit_message_text(
-            f"{note}\n\n{text_cfg}", chat_id=flow["chat_id"], message_id=flow["msg_id"],
-            parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+        await context.bot.edit_message_reply_markup(
+            chat_id=flow["chat_id"], message_id=flow["msg_id"], reply_markup=None)
     except BadRequest:
-        await update.effective_message.reply_text(
-            f"{note}\n\n{text_cfg}", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+        pass
+
+    # Enviar un MENSAJE NUEVO (abajo) con la confirmación y el panel del grupo,
+    # así el usuario lo ve sin tener que subir a buscar los botones.
+    text_cfg, kb = await _render_group(context, gid)
+    await update.effective_message.reply_text(
+        f"{note}\n\n{text_cfg}", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
 
 
 # --------------------------------------------------------------------------- #
