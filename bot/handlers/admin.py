@@ -29,7 +29,7 @@ async def cmd_adminpanel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "`/premiumgroups` — listar grupos Premium (con su ID)\n"
         "`/delpremium <group_id>` — quitar Premium a un grupo\n\n"
         "⭐ *Pagos (Stars)*\n"
-        "`/payments` — ver pagos recibidos (con su charge_id)\n"
+        "`/payments` — ver pagos recibidos (con su ID de cargo)\n"
         "`/refund <charge_id>` — reembolsar un pago concreto\n"
         "`/refundlast` — reembolsar el último pago\n"
         "`/balance` — saldo de Stars del bot\n\n"
@@ -108,7 +108,7 @@ async def cmd_premiumgroups(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     lines = ["💎 *Grupos Premium activos*", "━━━━━━━━━━━━━━━"]
     for g in groups:
         lines.append(f"`{g['group_id']}` · {g['days_left']} días · {g['source'] or '—'}")
-    lines.append("\nQuitar Premium: /delpremium <group_id>")
+    lines.append("\nQuitar Premium: `/delpremium ID`")
     await update.effective_message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
 
@@ -154,7 +154,7 @@ async def cmd_payments(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     lines = ["⭐ *Pagos recientes*", "━━━━━━━━━━━━━━━"]
     for r in rows:
         lines.append(f"#{r['id']} · {r['amount']}⭐ · {r['status']}\n  `{r['charge_id']}`")
-    lines.append("\nReembolsar: /refund <charge_id>  ·  o /refundlast")
+    lines.append("\nReembolsar: `/refund ID`  ·  o /refundlast")
     await update.effective_message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
 
