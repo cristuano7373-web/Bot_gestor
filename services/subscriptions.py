@@ -79,6 +79,31 @@ async def expire_due() -> int:
         return count
 
 
+async def deactivate_group(group_id: int) -> bool:
+    """Quita el Premium a un grupo manualmente. True si tenía suscripción."""
+    async with session_scope() as s:
+        sub = await _get(s, group_id)
+        if sub is None:
+            return False
+        sub.plan = "free"
+        sub.source = None
+        sub.auto_renew = False
+        sub.expires_at = None
+        return True
+
+
+async def list_premium_groups() -> list[dict]:
+    """Lista los grupos con Premium activo (para el admin del bot)."""
+    async with session_scope() as s:
+        res = await s.execute(select(Subscription).where(Subscription.plan == "premium"))
+        out = []
+        for sub in res.scalars():
+            d = _to_dict(sub)
+            if d["active"]:
+                out.append(d)
+        return out
+
+
 async def _get(session, group_id: int) -> Subscription | None:
     res = await session.execute(
         select(Subscription).where(Subscription.group_id == group_id)

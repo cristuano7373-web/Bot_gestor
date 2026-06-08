@@ -10,7 +10,7 @@ from telegram.ext import ContextTypes
 
 import config
 from security.permissions import admin_only
-from services import licenses, stats
+from services import licenses, stats, subscriptions
 from services import payments as payments_svc
 from services.entities import audit
 
@@ -81,6 +81,38 @@ async def cmd_statsglobal(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"💎 Grupos Premium: {g['premium_groups']}\n"
         f"⭐ Ingresos en Stars: {g['stars_revenue']}\n",
         parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+async def cmd_premiumgroups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    groups = await subscriptions.list_premium_groups()
+    if not groups:
+        await update.effective_message.reply_text("No hay grupos Premium activos.")
+        return
+    lines = ["💎 *Grupos Premium activos*", "━━━━━━━━━━━━━━━"]
+    for g in groups:
+        lines.append(f"`{g['group_id']}` · {g['days_left']} días · {g['source'] or '—'}")
+    lines.append("\nQuitar Premium: /delpremium <group_id>")
+    await update.effective_message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+async def cmd_delpremium(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    args = context.args or []
+    if not args or not args[0].lstrip("-").isdigit():
+        await update.effective_message.reply_text(
+            "Uso: /delpremium <group_id>\n(Ve los IDs con /premiumgroups)")
+        return
+    gid = int(args[0])
+    ok = await subscriptions.deactivate_group(gid)
+    if ok:
+        await audit(update.effective_user.id, "delpremium", str(gid))
+        await update.effective_message.reply_text(
+            f"✅ Premium retirado al grupo `{gid}`. Ahora es plan Gratis.",
+            parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.effective_message.reply_text(
+            "Ese grupo no tenía suscripción registrada.")
 
 
 @admin_only

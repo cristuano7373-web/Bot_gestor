@@ -91,6 +91,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("revokelicense", admin.cmd_revokelicense))
     app.add_handler(CommandHandler("premiumusers", admin.cmd_premiumusers))
     app.add_handler(CommandHandler("statsglobal", admin.cmd_statsglobal))
+    app.add_handler(CommandHandler(["premiumgroups", "grupospremium"], admin.cmd_premiumgroups))
+    app.add_handler(CommandHandler(["delpremium", "quitarpremium"], admin.cmd_delpremium))
     app.add_handler(CommandHandler("balance", admin.cmd_balance))
     app.add_handler(CommandHandler("payments", admin.cmd_payments))
     app.add_handler(CommandHandler("refund", admin.cmd_refund))

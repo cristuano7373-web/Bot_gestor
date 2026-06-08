@@ -94,6 +94,13 @@ async def test_subscription_extends_and_expires():
     assert await subscriptions.is_premium(-100) is False
     print("OK suscripciones: extensión de días y expiración automática")
 
+    # Quitar Premium manualmente
+    await subscriptions.activate_premium(-777, days=30, source="license", activated_by=1)
+    assert await subscriptions.is_premium(-777) is True
+    assert await subscriptions.deactivate_group(-777) is True
+    assert await subscriptions.is_premium(-777) is False
+    print("OK quitar Premium manualmente (deactivate_group)")
+
 
 async def test_settings():
     assert await settings.get(-100, "warn_limit") == 3
