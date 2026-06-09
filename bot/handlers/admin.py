@@ -21,8 +21,9 @@ async def cmd_adminpanel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "👑 *PANEL DEL DUEÑO*\n"
         "═══════════════\n\n"
         "🎟️ *Licencias (claves)*\n"
-        "`/createlicense <cant> <días>` — generar claves\n"
-        "   _ej:_ `/createlicense 5 30`\n"
+        "`/createlicense <días> [cantidad]` — generar claves\n"
+        "   _ej:_ `/createlicense 30` (1 clave de 30 días)\n"
+        "   _ej:_ `/createlicense 7 10` (10 claves de 7 días)\n"
         "`/revokelicense <código>` — anular una clave sin canjear\n"
         "`/premiumusers` — ver claves recientes y su estado\n\n"
         "💎 *Premium de grupos*\n"
@@ -37,7 +38,7 @@ async def cmd_adminpanel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "`/statsglobal` — grupos, Premium e ingresos totales\n\n"
         "═══════════════\n"
         "💡 *Flujo típico para vender:*\n"
-        "1) `/createlicense 1 30` → copias la clave\n"
+        "1) `/createlicense 30` → copias la clave\n"
         "2) Se la das al cliente que te pagó\n"
         "3) Él la canjea con `/redeem CLAVE` en su grupo\n"
         "4) Si hace falta: `/premiumgroups` y `/delpremium <id>`",
@@ -47,15 +48,21 @@ async def cmd_adminpanel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 @admin_only
 async def cmd_createlicense(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     args = context.args or []
-    count = int(args[0]) if args and args[0].isdigit() else 1
-    days = int(args[1]) if len(args) > 1 and args[1].isdigit() else config.PREMIUM_DAYS
+    # Formato intuitivo: /createlicense <días> [cantidad]
+    #   /createlicense 30      -> 1 licencia de 30 días
+    #   /createlicense 30 5    -> 5 licencias de 30 días
+    days = int(args[0]) if args and args[0].isdigit() else config.PREMIUM_DAYS
+    count = int(args[1]) if len(args) > 1 and args[1].isdigit() else 1
     count = max(1, min(50, count))
+    days = max(1, days)
     codes = await licenses.create_licenses(count, days, update.effective_user.id)
     await audit(update.effective_user.id, "createlicense", f"count={count} days={days}")
     listado = "\n".join(f"`{c}`" for c in codes)
+    plural = "licencias" if count > 1 else "licencia"
     await update.effective_message.reply_text(
-        f"🎟️ *{count} licencia(s) de {days} días generadas:*\n{listado}\n\n"
-        "Compártelas. Se canjean con /redeem CODIGO dentro de un grupo.",
+        f"🎟️ *{count} {plural} de {days} días:*\n{listado}\n\n"
+        "Se canjean con /redeem CODIGO dentro de un grupo.\n"
+        "_Formato:_ `/createlicense <días> [cantidad]`",
         parse_mode=ParseMode.MARKDOWN)
 
 

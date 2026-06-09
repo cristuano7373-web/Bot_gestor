@@ -31,3 +31,19 @@ async def ensure_group(chat_id: int, title: str | None, added_by: int | None = N
 async def audit(actor_id: int | None, action: str, detail: str | None = None) -> None:
     async with session_scope() as s:
         s.add(AuditLog(actor_id=actor_id, action=action, detail=detail))
+
+
+async def get_lang(user_id: int) -> str:
+    """Idioma del usuario ('es'/'en'). Por defecto 'es'."""
+    async with session_scope() as s:
+        u = await s.get(User, user_id)
+        return (u.lang if u and u.lang else "es")
+
+
+async def set_lang(user_id: int, lang: str) -> None:
+    async with session_scope() as s:
+        u = await s.get(User, user_id)
+        if u is None:
+            s.add(User(id=user_id, lang=lang))
+        else:
+            u.lang = lang

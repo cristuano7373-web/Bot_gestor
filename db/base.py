@@ -49,6 +49,15 @@ async def create_all() -> None:
     engine = init_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # Migración ligera: añadir columna 'lang' a bases de datos ya existentes.
+    # En Postgres 'IF NOT EXISTS' evita el error; en SQLite la columna ya viene
+    # del modelo, así que el fallo se ignora sin problema.
+    async with engine.begin() as conn:
+        try:
+            await conn.exec_driver_sql(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS lang VARCHAR(5) DEFAULT 'es'")
+        except Exception:  # noqa: BLE001
+            pass
 
 
 async def dispose() -> None:

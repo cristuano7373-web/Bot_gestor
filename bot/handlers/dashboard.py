@@ -18,8 +18,9 @@ from telegram.ext import ContextTypes
 
 import config
 from bot.common import is_group
+from bot import i18n
 from services import settings, subscriptions, licenses
-from services.entities import ensure_group, ensure_user, audit
+from services.entities import ensure_group, ensure_user, audit, get_lang, set_lang
 from db.base import get_sessionmaker
 from db.models import Group
 
@@ -113,14 +114,18 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
     await update.effective_message.reply_text(
-        INTRO, parse_mode=ParseMode.MARKDOWN, reply_markup=_home_kb())
+        i18n.t("es", "pick_language"), parse_mode=ParseMode.MARKDOWN,
+        reply_markup=i18n.lang_keyboard())
 
 
-def _home_kb() -> InlineKeyboardMarkup:
+def _home_kb(lang: str = "es") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚙️ Configurar un grupo", callback_data="dash:groups")],
-        [InlineKeyboardButton("💎 Premium", callback_data="dash:prem:0")],
-        [InlineKeyboardButton("❓ ¿Qué es esto?", callback_data="dash:what")],
+        [InlineKeyboardButton(i18n.t(lang, "btn_config"), callback_data="dash:groups")],
+        [InlineKeyboardButton(i18n.t(lang, "btn_premium"), callback_data="dash:prem:0")],
+        [
+            InlineKeyboardButton(i18n.t(lang, "btn_what"), callback_data="dash:what"),
+            InlineKeyboardButton(i18n.t(lang, "btn_lang"), callback_data="dash:lang:pick"),
+        ],
     ])
 
 
@@ -153,10 +158,10 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 # --------------------------------------------------------------------------- #
 async def _render_group(context, gid: int):
     cfg = await settings.get_all(gid)
-    premium = await subscriptions.is_premium(gid)
+    sub = await subscriptions.get_subscription(gid)
+    premium = bool(sub and sub.get("active"))
     title = await _group_title(gid)
     plan = "💎 Premium" if premium else "🆓 Gratis"
-    sub = await subscriptions.get_subscription(gid)
     extra = f" · {sub['days_left']}d" if (premium and sub and sub.get("days_left") is not None) else ""
 
     # Resumen de qué está activo (estilo GroupHelp).
@@ -251,12 +256,28 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if action == "home":
         await query.answer()
-        await _edit(query, INTRO, _home_kb())
+        lang = await get_lang(user.id)
+        await _edit(query, i18n.t(lang, "intro"), _home_kb(lang))
         return
 
     if action == "what":
         await query.answer()
-        await _edit(query, WHAT, _back_home_kb())
+        lang = await get_lang(user.id)
+        await _edit(query, i18n.t(lang, "what"), _back_home_kb(lang))
+        return
+
+    if action == "lang":
+        choice = parts[2]
+        if choice == "pick":
+            await query.answer()
+            await _edit(query, i18n.t(await get_lang(user.id), "pick_language"),
+                        i18n.lang_keyboard())
+            return
+        # Guardar idioma elegido y mostrar el inicio en ese idioma.
+        await set_lang(user.id, choice if choice in ("es", "en") else "es")
+        lang = await get_lang(user.id)
+        await query.answer(i18n.t(lang, "lang_set"))
+        await _edit(query, i18n.t(lang, "intro"), _home_kb(lang))
         return
 
     if action == "groups":
@@ -531,8 +552,9 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 # --------------------------------------------------------------------------- #
 # Teclados utilitarios
 # --------------------------------------------------------------------------- #
-def _back_home_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton("‹ Volver", callback_data="dash:home")]])
+def _back_home_kb(lang: str = "es") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(
+        i18n.t(lang, "btn_back"), callback_data="dash:home")]])
 
 
 def _cancel_kb(gid: int) -> InlineKeyboardMarkup:

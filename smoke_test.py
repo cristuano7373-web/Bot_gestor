@@ -27,7 +27,12 @@ async def test_db_and_entities():
     await create_all()
     await ensure_user(1, "tokyo", "Tokyo")
     await ensure_group(-100, "Mi Grupo", added_by=1)
-    print("OK base de datos: tablas creadas, usuario y grupo registrados")
+    # Idioma por defecto y cambio
+    from services.entities import get_lang, set_lang
+    assert await get_lang(1) == "es"
+    await set_lang(1, "en")
+    assert await get_lang(1) == "en"
+    print("OK base de datos: tablas creadas, usuario, grupo e idioma")
 
 
 async def test_licenses_and_premium():
